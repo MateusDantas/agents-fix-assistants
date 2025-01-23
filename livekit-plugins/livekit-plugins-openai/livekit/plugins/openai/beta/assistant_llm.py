@@ -330,7 +330,7 @@ class AssistantLLMStream(llm.LLMStream):
         self._tool_call_id: str | None = None
         self._fnc_name: str | None = None
         self._fnc_raw_arguments: str | None = None
-        self._create_stream_task = asyncio.create_task(self._main_task())
+        self._create_stream_task = asyncio.create_task(self._run())
         self._sync_openai_task = sync_openai_task
 
         # Running stream is used to ensure that we only have one stream running at a time
@@ -353,9 +353,11 @@ class AssistantLLMStream(llm.LLMStream):
         # 7. Resolve the OpenAI message id with all messages that have a LiveKit message id.
         try:
             load_options = await self._sync_openai_task
+            logger.debug(f"Loaded assistant options: {load_options}")
 
             # The assistants api does not let us modify messages while a stream is running.
             # So we have to make sure previous streams are done before starting a new one.
+            logger.debug("Waiting for previous streams to finish")
             await asyncio.gather(*self._llm._done_futures)
             self._llm._done_futures.clear()
             self._llm._done_futures.append(self._done_future)
