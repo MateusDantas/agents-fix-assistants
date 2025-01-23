@@ -246,16 +246,26 @@ class AssistantLLMStream(llm.LLMStream):
         async def on_text_delta(self, delta: TextDelta, snapshot: Text):
             assert self.current_run is not None
 
-            self._event_ch.send_nowait(
-                llm.ChatChunk(
-                    request_id=self.current_run.id,
-                    choices=[
-                        llm.Choice(
-                            delta=llm.ChoiceDelta(role="assistant", content=delta.value)
-                        )
-                    ],
+            try:
+                self._event_ch.send_nowait(
+                    llm.ChatChunk(
+                        request_id=self.current_run.id,
+                        choices=[
+                            llm.Choice(
+                                delta=llm.ChoiceDelta(
+                                    role="assistant", content=delta.value
+                                )
+                            )
+                        ],
+                    )
                 )
-            )
+            except utils.aio.ChanClosed:
+                # The channel is closed, no action needed
+                pass
+            except Exception as e:
+                logger.error(f"Exception in on_text_delta: {e}")
+                self._llm_stream._exception = e
+                self._llm_stream._event_ch.close()
 
         async def on_tool_call_created(self, tool_call: ToolCall):
             if not self.current_run:
@@ -515,9 +525,13 @@ class AssistantLLMStream(llm.LLMStream):
                     openai_addded_messages_set.add(oai_msg_id)
                     # We don't need the LiveKit message id anymore
                     lk_msg_id_dict.pop(load_options.thread_id)
-
+        except Exception as e:
+            logger.error(f"Unexpected error in _main_task: {e}")
+            self._exception = e
+            self._event_ch.close()
         finally:
-            self._done_future.set_result(None)
+            if not self._done_future.done():
+                self._done_future.set_result(None)
 
     async def _upload_frame(
         self,
